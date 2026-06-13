@@ -449,14 +449,11 @@ const handler = async (sock, msg, store) => {
         return
       }
 
-      // Jalankan command
+      // Jalankan command (tanpa reaction emoji — chat lebih bersih)
       try {
-        await ctx.reply.react("⏳")
         await cmd.handler(ctx)
-        await ctx.reply.react("✅")
       } catch (err) {
         logError(`Error command: ${ctx.command}`, err)
-        await ctx.reply.react("❌").catch(() => {})
         await ctx.reply.text(config.msg.error).catch(() => {})
       }
 

@@ -91,8 +91,8 @@ const config = {
 
   // ─── Native Flow / Button ────────────────────────────────
   button: {
-    // true = coba native flow dulu, false = teks biasa langsung
-    useNativeFlow: true,
+    // Native flow dimatikan — pakai tampilan teks rapi (lebih stabil)
+    useNativeFlow: false,
 
     // Warna button (hex, khusus native flow)
     color: "#128C7E",
