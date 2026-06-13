@@ -135,8 +135,9 @@ const categories = {
     title: "GROUP",
     items: [
       ".kick @user — Keluarkan member",
-      ".add <nomor> — Tambah member",
+      ".add <nomor> — Tambah member (Owner)",
       ".promote / .demote @user",
+      ".delete — Hapus pesan (reply)",
       ".tagall <teks> — Tag semua (terlihat)",
       ".hidetag <teks> — Tag tersembunyi",
       ".totag — Hidetag pesan yang direply",

@@ -66,11 +66,17 @@ export const commands = [
     },
   },
 
-  // ─── .add ────────────────────────────────────────────────
+  // ─── .add (KHUSUS OWNER) ─────────────────────────────────
   {
     pattern: /^(add|tambah)$/,
-    description: "Tambah member ke grup",
-    ...adminCmd,
+    description: "Tambah member ke grup (khusus Owner)",
+    category: "group",
+    owner: true, // hanya owner bot
+    group: true,
+    private: false,
+    admin: false,
+    botAdmin: true,
+    premium: false,
     handler: async (ctx) => {
       const num = ctx.args[0]?.replace(/[^0-9]/g, "")
       if (!num || num.length < 5)
@@ -140,6 +146,30 @@ export const commands = [
           text: `⬇️ @${fromJID(target)} sekarang menjadi *Member* biasa.`,
           mentions: [target],
         })
+      } catch {
+        await ctx.reply.text(config.msg.error)
+      }
+    },
+  },
+
+  // ─── .delete / .del ──────────────────────────────────────
+  {
+    pattern: /^(delete|del|d)$/,
+    description: "Hapus pesan yang di-reply",
+    ...adminCmd,
+    handler: async (ctx) => {
+      if (!ctx.quoted)
+        return ctx.reply.text("❌ Reply pesan yang ingin dihapus, lalu ketik *.delete*")
+
+      try {
+        // Bangun key pesan yang di-reply untuk dihapus
+        const delKey = {
+          remoteJid: ctx.jid,
+          fromMe: false,
+          id: ctx.quoted.stanzaId,
+          participant: ctx.quoted.sender,
+        }
+        await ctx.sock.sendMessage(ctx.jid, { delete: delKey })
       } catch {
         await ctx.reply.text(config.msg.error)
       }
