@@ -1,0 +1,17 @@
+{
+  "users": {},
+  "groups": {},
+  "premium": {},
+  "banned": {},
+  "settings": {
+    "autoRead": true,
+    "autoTyping": true,
+    "selfMode": false,
+    "botMode": "both"
+  },
+  "stats": {
+    "totalMessages": 0,
+    "totalCommands": 0,
+    "startedAt": null
+  }
+}
