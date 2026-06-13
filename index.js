@@ -8,43 +8,41 @@
 import chalk from "chalk"
 import figlet from "figlet"
 import { promisify } from "util"
-import fs from "fs"
-import path from "path"
 
 import config from "./config.js"
 import connect from "./lib/connect.js"
 import handler, { loadPlugins } from "./handler.js"
-import { logError, logInfo, logLine, logSystem, logWarn } from "./lib/logger.js"
+import { logError, logLine, logSystem } from "./lib/logger.js"
 import { ensureDir, formatUptime } from "./lib/function.js"
-import { backupDB, getStats, updateSettings } from "./lib/database.js"
+import { backupDB, getStats, loadDB, saveDB } from "./lib/database.js"
 
 const figletAsync = promisify(figlet)
 
-// ─── Banner ───────────────────────────────────────────────────
+// ─── Banner ASCII ─────────────────────────────────────────────
 
 const printBanner = async () => {
   try {
-    const banner = await figletAsync("Habibih Bot", {
+    const banner = await figletAsync("Habibih  Bot", {
       font: "Standard",
       horizontalLayout: "default",
     })
     console.log(chalk.cyan(banner))
   } catch {
-    console.log(chalk.cyan("╔══════════════════════════╗"))
-    console.log(chalk.cyan("║      HABIBIH BOT         ║"))
-    console.log(chalk.cyan("╚══════════════════════════╝"))
+    console.log(chalk.cyan("\n  ╔══════════════════════════╗"))
+    console.log(chalk.cyan("  ║      HABIBIH BOT         ║"))
+    console.log(chalk.cyan("  ╚══════════════════════════╝\n"))
   }
 
   logLine()
-  console.log(chalk.green("  🤖 Bot    : ") + chalk.white(config.botName))
-  console.log(chalk.green("  👑 Owner  : ") + chalk.white(config.ownerName))
-  console.log(chalk.green("  📦 Versi  : ") + chalk.white(config.botVersion))
-  console.log(chalk.green("  🌐 Web    : ") + chalk.white(config.website))
-  console.log(chalk.green("  📢 Saluran: ") + chalk.white(config.channelWA))
+  console.log(chalk.green("  🤖 Bot     : ") + chalk.white(config.botName))
+  console.log(chalk.green("  👑 Owner   : ") + chalk.white(config.ownerName))
+  console.log(chalk.green("  📦 Versi   : ") + chalk.white(config.botVersion))
+  console.log(chalk.green("  🔌 Metode  : ") + chalk.white(config.connection.method.toUpperCase()))
+  console.log(chalk.green("  🌐 Website : ") + chalk.white(config.website))
   logLine()
 }
 
-// ─── Pastikan Direktori Penting Ada ───────────────────────────
+// ─── Inisialisasi Direktori ───────────────────────────────────
 
 const initDirectories = () => {
   const dirs = [
@@ -56,11 +54,27 @@ const initDirectories = () => {
     "./plugins",
     "./logs",
   ]
-  dirs.forEach((dir) => ensureDir(dir))
+  dirs.forEach(ensureDir)
   logSystem("Direktori berhasil diinisialisasi")
 }
 
-// ─── Auto Backup Database ─────────────────────────────────────
+// ─── Inisialisasi Database ────────────────────────────────────
+
+const initDatabase = () => {
+  const db = loadDB()
+
+  // Set startedAt jika belum ada
+  if (!db.stats) db.stats = {}
+  if (!db.stats.startedAt) {
+    db.stats.startedAt = new Date().toISOString()
+    db.stats.totalMessages = db.stats.totalMessages || 0
+    db.stats.totalCommands = db.stats.totalCommands || 0
+    saveDB(db)
+    logSystem("Database diinisialisasi")
+  }
+}
+
+// ─── Auto Backup ──────────────────────────────────────────────
 
 const startAutoBackup = () => {
   const intervalMs = (config.settings.backupInterval || 6) * 60 * 60 * 1000
@@ -68,27 +82,31 @@ const startAutoBackup = () => {
     logSystem("Menjalankan auto backup database...")
     backupDB()
   }, intervalMs)
-  logSystem(`Auto backup aktif setiap ${config.settings.backupInterval} jam`)
+  logSystem(
+    `Auto backup aktif setiap ${config.settings.backupInterval} jam`
+  )
 }
 
-// ─── Global Error Handler ─────────────────────────────────────
+// ─── Global Error Handlers ────────────────────────────────────
 
-const setupGlobalErrorHandlers = () => {
+const setupErrorHandlers = () => {
   process.on("uncaughtException", (err) => {
     logError("UNCAUGHT EXCEPTION — Bot tetap berjalan", err)
   })
 
   process.on("unhandledRejection", (reason) => {
-    logError("UNHANDLED REJECTION — Bot tetap berjalan", { reason: String(reason) })
+    logError("UNHANDLED REJECTION — Bot tetap berjalan", {
+      reason: String(reason),
+    })
   })
 
   process.on("SIGINT", () => {
     logLine()
-    logSystem("Bot dihentikan oleh user (SIGINT)")
-    logSystem(`Uptime terakhir: ${formatUptime(Math.floor(process.uptime()))}`)
+    logSystem("Bot dihentikan (SIGINT)")
+    logSystem(`Uptime: ${formatUptime(Math.floor(process.uptime()))}`)
     const stats = getStats()
-    logSystem(`Total pesan diproses: ${stats.totalMessages || 0}`)
-    logSystem(`Total command dijalankan: ${stats.totalCommands || 0}`)
+    logSystem(`Pesan diproses: ${stats.totalMessages || 0}`)
+    logSystem(`Command dijalankan: ${stats.totalCommands || 0}`)
     logLine()
     backupDB()
     process.exit(0)
@@ -101,42 +119,34 @@ const setupGlobalErrorHandlers = () => {
   })
 }
 
-// ─── Main Boot Function ───────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────
 
 const start = async () => {
   // 1. Tampilkan banner
   await printBanner()
 
-  // 2. Setup global error handlers
-  setupGlobalErrorHandlers()
+  // 2. Pasang global error handlers
+  setupErrorHandlers()
 
-  // 3. Inisialisasi direktori
+  // 3. Buat semua direktori
   initDirectories()
 
-  // 4. Load semua plugin
+  // 4. Init database
+  initDatabase()
+
+  // 5. Load semua plugin
   logSystem("Memuat plugin...")
   await loadPlugins()
 
-  // 5. Set waktu mulai di database stats
-  const db = (await import("./lib/database.js")).getDB()
-  if (!db.stats?.startedAt) {
-    updateSettings({}) // trigger load
-    const { loadDB, saveDB } = await import("./lib/database.js")
-    const d = loadDB()
-    if (!d.stats) d.stats = {}
-    d.stats.startedAt = new Date().toISOString()
-    saveDB(d)
-  }
-
-  // 6. Start auto backup
+  // 6. Mulai auto backup
   startAutoBackup()
 
   // 7. Koneksi ke WhatsApp
-  logSystem(`Metode koneksi: ${config.connection.method.toUpperCase()}`)
+  logSystem(
+    `Menghubungkan ke WhatsApp (metode: ${config.connection.method.toUpperCase()})...`
+  )
   await connect(handler)
 }
-
-// ─── Jalankan ─────────────────────────────────────────────────
 
 start().catch((err) => {
   logError("FATAL ERROR saat startup", err)
