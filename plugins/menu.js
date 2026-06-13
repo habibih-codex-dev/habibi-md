@@ -15,20 +15,7 @@ import {
   getFullDate,
   getTime,
   getSalamIslami,
-  randomItem,
 } from "../lib/function.js"
-
-// ─── Quote Islami Acak untuk Footer ──────────────────────────
-const quotes = [
-  "Sebaik-baik manusia adalah yang bermanfaat bagi orang lain.",
-  "Barangsiapa bersungguh-sungguh, pasti akan berhasil.",
-  "Jangan menunda kebaikan, karena waktu tak pernah kembali.",
-  "Senyummu di hadapan saudaramu adalah sedekah.",
-  "Allah tidak membebani seseorang melainkan sesuai kesanggupannya.",
-  "Doa adalah senjata seorang mukmin.",
-  "Bersyukurlah, maka nikmatmu akan ditambah.",
-  "Sabar itu indah, dan Allah bersama orang-orang yang sabar.",
-]
 
 // ─── Header Menu (dipakai semua menu) ────────────────────────
 const buildHeader = (ctx) => {
@@ -62,8 +49,6 @@ const buildFooter = () => {
 │ ◦ Web     : ${config.website}
 │ ◦ Channel : ${config.channelWA}
 ╰────────────────
-
-💬 _"${randomItem(quotes)}"_
 
 > ${config.watermark}`
 }
@@ -217,32 +202,29 @@ ${allCats}
 ${buildFooter()}`
 }
 
-// ─── Kirim menu (video dulu, lalu teks terpisah) ─────────────
+// ─── Kirim menu (media + teks digabung jadi 1 pesan) ─────────
 const sendMenu = async (ctx, menuText) => {
-  // 1. Kirim media dengan caption pendek (biar video kebuka penuh)
   try {
     const mediaBuffer = await getMenuMedia()
-    const shortCaption = `🌙 *${config.botName}* siap melayani!\n_Menu lengkap di pesan berikutnya..._`
 
     if (config.menu.mediaType === "video") {
       await ctx.sock.sendMessage(
         ctx.jid,
-        { video: mediaBuffer, caption: shortCaption, gifPlayback: false },
+        { video: mediaBuffer, caption: menuText, gifPlayback: false },
         { quoted: ctx.msg }
       )
     } else {
       await ctx.sock.sendMessage(
         ctx.jid,
-        { image: mediaBuffer, caption: shortCaption },
+        { image: mediaBuffer, caption: menuText },
         { quoted: ctx.msg }
       )
     }
   } catch (err) {
-    logError("Gagal kirim media menu, lanjut teks saja", err)
+    // Jika media gagal dimuat, kirim teks saja sebagai fallback
+    logError("Gagal kirim media menu, fallback teks", err)
+    await ctx.reply.text(menuText)
   }
-
-  // 2. Kirim menu teks lengkap di pesan terpisah
-  await ctx.reply.text(menuText)
 }
 
 // ─── Commands Export ──────────────────────────────────────────
