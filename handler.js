@@ -27,6 +27,7 @@ import {
   getSettings,
 } from "./lib/database.js"
 import { logError, logMsg, logWarn } from "./lib/logger.js"
+import { runProtection } from "./lib/protection.js"
 
 // ─── Plugin Registry ──────────────────────────────────────────
 const plugins = new Map()
@@ -390,6 +391,48 @@ const buildContext = async (sock, msg, store) => {
   }
 }
 
+// ─── Anti Delete Handler ──────────────────────────────────────
+
+/**
+ * Tangani pesan yang dihapus (revoke). Jika antidelete aktif,
+ * kirim ulang pesan asli dari store ke grup.
+ */
+const handleAntiDelete = async (sock, msg, store) => {
+  try {
+    const jid = msg.key.remoteJid
+    const groupData = getGroup(jid)
+    if (!groupData?.antidelete) return
+
+    const protocol = msg.message?.protocolMessage
+    // type 0 = REVOKE
+    if (!protocol || protocol.type !== 0) return
+
+    const deletedKey = protocol.key
+    if (!deletedKey?.id) return
+
+    // Ambil pesan asli dari store
+    const original = store.loadMessage(jid, deletedKey.id)
+    if (!original?.message) return
+
+    // Siapa yang menghapus
+    const deleter = msg.key.participant || msg.participant || ""
+    const sender = deletedKey.participant || original.key?.participant || ""
+
+    await sock.sendMessage(jid, {
+      text:
+        `🗑️ *ANTI DELETE*\n\n` +
+        `@${fromJID(deleter)} menghapus pesan dari @${fromJID(sender)}.\n` +
+        `Berikut pesan yang dihapus:`,
+      mentions: [deleter, sender].filter(Boolean),
+    })
+
+    // Kirim ulang pesan asli
+    await sock.sendMessage(jid, { forward: original })
+  } catch (err) {
+    logError("Error pada anti delete", err)
+  }
+}
+
 // ─── Main Handler ─────────────────────────────────────────────
 
 const handler = async (sock, msg, store) => {
@@ -411,6 +454,12 @@ const handler = async (sock, msg, store) => {
 
     const ctx = await buildContext(sock, msg, store)
 
+    // ─── ANTI DELETE — lacak pesan yang dihapus ──────────
+    if (ctx.isGroupMsg && ctx.msgType === "protocolMessage") {
+      await handleAntiDelete(sock, msg, store)
+      return
+    }
+
     // Auto typing saat command masuk
     if (dbSettings.autoTyping && ctx.isCmd) {
       await sock
@@ -424,6 +473,22 @@ const handler = async (sock, msg, store) => {
     const botMode = dbSettings.botMode || config.settings.botMode
     if (botMode === "group" && !ctx.isGroupMsg) return
     if (botMode === "private" && ctx.isGroupMsg) return
+
+    // ─── PROTECTION — cek semua anti-* (semua pesan grup) ─
+    if (ctx.isGroupMsg) {
+      const handled = await runProtection(ctx)
+      if (handled) return // pesan ditindak, hentikan proses
+    }
+
+    // ─── MUTE — bot diam di grup (kecuali admin & owner) ──
+    if (
+      ctx.isGroupMsg &&
+      ctx.groupData?.mute &&
+      !ctx.isAdminSender &&
+      !ctx.isOwnerSender
+    ) {
+      return
+    }
 
     if (!ctx.isCmd) return
 
@@ -477,22 +542,56 @@ handler.onGroupUpdate = async (sock, update) => {
     } catch {}
 
     const groupName = groupMeta?.subject || id
+    const memberCount = groupMeta?.participants?.length || 0
 
     for (const participant of participants) {
       const number = fromJID(participant)
 
+      // ─── WELCOME ───────────────────────────────────────
       if (action === "add" && groupData?.welcome) {
-        await sock.sendMessage(id, {
-          text: `👋 Selamat datang @${number} di grup *${groupName}*!\n\nSemoga betah ya 😊`,
-          mentions: [participant],
-        })
+        // Ganti placeholder pada teks custom
+        const template =
+          groupData.welcomeText ||
+          "👋 Selamat datang @user di grup *@group*!\n\nKamu anggota ke-@count. Semoga betah ya 😊"
+
+        const text = template
+          .replace(/@user/g, `@${number}`)
+          .replace(/@group/g, groupName)
+          .replace(/@count/g, memberCount)
+
+        const content = { text, mentions: [participant] }
+
+        if (groupData.welcomeImage) {
+          await sock.sendMessage(id, {
+            image: { url: groupData.welcomeImage },
+            caption: text,
+            mentions: [participant],
+          })
+        } else {
+          await sock.sendMessage(id, content)
+        }
       }
 
+      // ─── GOODBYE ───────────────────────────────────────
       if ((action === "remove" || action === "leave") && groupData?.goodbye) {
-        await sock.sendMessage(id, {
-          text: `👋 Sampai jumpa @${number}, semoga sukses selalu!`,
-          mentions: [participant],
-        })
+        const template =
+          groupData.goodbyeText ||
+          "👋 Sampai jumpa @user, semoga sukses selalu!"
+
+        const text = template
+          .replace(/@user/g, `@${number}`)
+          .replace(/@group/g, groupName)
+          .replace(/@count/g, memberCount)
+
+        if (groupData.goodbyeImage) {
+          await sock.sendMessage(id, {
+            image: { url: groupData.goodbyeImage },
+            caption: text,
+            mentions: [participant],
+          })
+        } else {
+          await sock.sendMessage(id, { text, mentions: [participant] })
+        }
       }
     }
   } catch (err) {
