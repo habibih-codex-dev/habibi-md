@@ -11,9 +11,6 @@ import config from "./config.js"
 import {
   fromJID,
   isGroup,
-  isOwner,
-  normalizeJID,
-  compareJID,
   sleep,
 } from "./lib/function.js"
 import {
@@ -78,6 +75,14 @@ export const loadPlugins = async () => {
 export const getPlugins = () => plugins
 
 // ─── Extract Pesan ────────────────────────────────────────────
+
+/**
+ * Ambil bagian "nomor" murni dari sebuah JID/LID.
+ * Buang domain (@s.whatsapp.net / @lid / @g.us) dan device suffix (:12).
+ * @param {string} jid
+ */
+const bareId = (jid) =>
+  jid ? String(jid).split("@")[0].split(":")[0] : ""
 
 /**
  * Ekstrak konten teks dari berbagai tipe pesan Baileys v7
@@ -263,18 +268,47 @@ const buildContext = async (sock, msg, store) => {
   const jid = msg.key.remoteJid || ""
   const isGroupMsg = isGroup(jid)
 
-  // ─── Sender JID — handle LID & JID ───────────────────────
-  let senderJid = ""
-  if (isGroupMsg) {
-    senderJid = msg.key.participant || msg.participant || ""
-  } else {
-    senderJid = msg.key.fromMe ? (sock.user?.id || "") : jid
-  }
-  senderJid = normalizeJID(senderJid)
-
-  const senderNumber = fromJID(senderJid)
-  const isOwnerSender = isOwner(senderJid)
+  // ─── Sender & Identitas (handle LID & JID Baileys v7) ────
   const fromMe = msg.key.fromMe || false
+
+  // senderJid: dipakai untuk mention/reply (mengikuti addressing grup)
+  let senderJid = ""
+  // senderIdSet: SEMUA kemungkinan identitas nomor pengirim (lid + pn)
+  const senderIdSet = new Set()
+
+  if (isGroupMsg) {
+    senderJid =
+      msg.key.participant || msg.participant || msg.key.participantAlt || ""
+    for (const f of [
+      msg.key.participant,
+      msg.key.participantPn, // nomor HP versi baru
+      msg.key.participantAlt,
+      msg.participant,
+    ]) {
+      if (f) senderIdSet.add(bareId(f))
+    }
+  } else {
+    senderJid = fromMe ? sock.user?.id || "" : jid
+    for (const f of [
+      fromMe ? sock.user?.id : jid,
+      fromMe ? sock.user?.lid : null,
+    ]) {
+      if (f) senderIdSet.add(bareId(f))
+    }
+  }
+
+  // Perkaya identitas via LID mapping bawaan Baileys (best-effort)
+  try {
+    const lidMap = sock.signalRepository?.lidMapping
+    if (lidMap) {
+      for (const idn of [...senderIdSet]) {
+        const pn = lidMap.getPNForLID?.(idn + "@lid")
+        if (pn && typeof pn === "string") senderIdSet.add(bareId(pn))
+        const lid = lidMap.getLIDForPN?.(idn + "@s.whatsapp.net")
+        if (lid && typeof lid === "string") senderIdSet.add(bareId(lid))
+      }
+    }
+  } catch {}
 
   // ─── Teks & Tipe ─────────────────────────────────────────
   const body = extractText(msg)
@@ -291,7 +325,7 @@ const buildContext = async (sock, msg, store) => {
   const text = args.join(" ")
   const query = text.trim()
 
-  // ─── Group Info ──────────────────────────────────────────
+  // ─── Group Info & Deteksi Admin (multi-identifier) ───────
   let groupMetadata = null
   let groupName = ""
   let members = []
@@ -306,29 +340,69 @@ const buildContext = async (sock, msg, store) => {
         groupName = groupMetadata.subject || ""
         members = groupMetadata.participants || []
 
-        // Handle LID + JID — Baileys v7 bisa kembalikan LID
-        admins = members
-          .filter((p) => p.admin === "admin" || p.admin === "superadmin")
-          .map((p) => p.id)
+        const isAdminP = (p) =>
+          p.admin === "admin" || p.admin === "superadmin"
 
-        const botJid = normalizeJID(sock.user?.id || "")
+        // admins (id asli untuk mention)
+        admins = members.filter(isAdminP).map((p) => p.id)
 
-        isBotAdmin = members.some(
-          (p) =>
-            (p.admin === "admin" || p.admin === "superadmin") &&
-            compareJID(p.id, botJid)
-        )
+        // Kumpulkan SEMUA identitas tiap admin: id, lid, jid, phoneNumber
+        const adminIdSet = new Set()
+        for (const p of members) {
+          if (!isAdminP(p)) continue
+          for (const f of [p.id, p.lid, p.jid, p.phoneNumber]) {
+            if (f) adminIdSet.add(bareId(f))
+          }
+        }
 
-        isAdminSender = members.some(
-          (p) =>
-            (p.admin === "admin" || p.admin === "superadmin") &&
-            compareJID(p.id, senderJid)
-        )
+        // Perkaya identitas SENDER dari metadata:
+        // jika sender cocok dengan 1 peserta lewat id manapun,
+        // ambil semua id peserta itu (lid + pn) → owner/admin akurat
+        for (const p of members) {
+          const pids = [p.id, p.lid, p.jid, p.phoneNumber]
+            .filter(Boolean)
+            .map(bareId)
+          if (pids.some((x) => senderIdSet.has(x))) {
+            pids.forEach((x) => senderIdSet.add(x))
+          }
+        }
+
+        // Identitas BOT (id + lid + identitas dari metadata)
+        const botIdSet = new Set()
+        for (const f of [sock.user?.id, sock.user?.lid]) {
+          if (f) botIdSet.add(bareId(f))
+        }
+        for (const p of members) {
+          const pids = [p.id, p.lid, p.jid, p.phoneNumber]
+            .filter(Boolean)
+            .map(bareId)
+          if (pids.some((x) => botIdSet.has(x))) {
+            pids.forEach((x) => botIdSet.add(x))
+          }
+        }
+
+        // Cocokkan: ada irisan identitas?
+        isBotAdmin = [...botIdSet].some((b) => adminIdSet.has(b))
+        isAdminSender = [...senderIdSet].some((s) => adminIdSet.has(s))
       }
     } catch (err) {
       logError("Gagal fetch group metadata", err)
     }
   }
+
+  // ─── Nomor HP & Owner (setelah identitas diperkaya) ──────
+  // Cari nomor HP pengirim (untuk antiforeign & tampilan)
+  let senderPhone = ""
+  const phoneCandidate =
+    msg.key.participantPn ||
+    (senderJid.endsWith("@s.whatsapp.net") ? senderJid : "") ||
+    (!isGroupMsg && jid.endsWith("@s.whatsapp.net") ? jid : "")
+  if (phoneCandidate) senderPhone = bareId(phoneCandidate)
+
+  const senderNumber = senderPhone || bareId(senderJid)
+
+  // Owner: cek SEMUA identitas pengirim terhadap daftar nomor owner
+  const isOwnerSender = config.ownerNumber.some((o) => senderIdSet.has(o))
 
   // ─── Database ────────────────────────────────────────────
   const userData = getUser(senderJid)
@@ -356,6 +430,7 @@ const buildContext = async (sock, msg, store) => {
     // Sender
     senderJid,
     senderNumber,
+    senderPhone,
     pushName,
     isOwnerSender,
 
