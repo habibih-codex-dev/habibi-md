@@ -68,7 +68,7 @@ export const commands = [
   makeToggle("antidelete", "antidelete", "Anti Delete"),
   makeToggle("antivirtex", "antivirtex", "Anti Virtex"),
   makeToggle("antimedia", "antimedia", "Anti Media"),
-  makeToggle("onlyadmin", "onlyadmin", "Only Admin (hanya admin kirim)"),
+  makeToggle("onlyadmin", "onlyadmin", "Only Admin (hanya admin/owner pakai bot)"),
 
   // ─── Welcome / Goodbye toggle ────────────────────────────
   makeToggle("welcome", "welcome", "Pesan Selamat Datang"),

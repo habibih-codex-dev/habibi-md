@@ -492,6 +492,16 @@ const handler = async (sock, msg, store) => {
 
     if (!ctx.isCmd) return
 
+    // ─── ONLY ADMIN — hanya admin grup & owner pakai bot ──
+    if (
+      ctx.isGroupMsg &&
+      ctx.groupData?.onlyadmin &&
+      !ctx.isAdminSender &&
+      !ctx.isOwnerSender
+    ) {
+      return // command diabaikan untuk non-admin
+    }
+
     logMsg(ctx.senderNumber, `${ctx.prefix}${ctx.command}`)
     incrementCommands()
 

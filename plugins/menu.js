@@ -161,7 +161,7 @@ const categories = {
       ".antiforeign / .antispam on/off",
       ".antitag / .antidelete on/off",
       ".antivirtex / .antimedia on/off",
-      ".onlyadmin on/off",
+      ".onlyadmin on/off — hanya admin pakai bot",
       ".welcome / .goodbye on/off",
       ".setwelcome / .setgoodbye <teks>",
       ".setwelcomeimg / .setgoodbyeimg <url>",
