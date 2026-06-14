@@ -8,6 +8,11 @@
 import chalk from "chalk"
 import figlet from "figlet"
 import { promisify } from "util"
+import dns from "dns"
+
+// Paksa resolusi DNS mengutamakan IPv4 — cegah timeout pada
+// koneksi ke API publik (mis. aladhan) di jaringan tanpa IPv6.
+dns.setDefaultResultOrder("ipv4first")
 
 import config from "./config.js"
 import connect, { getSocket } from "./lib/connect.js"
