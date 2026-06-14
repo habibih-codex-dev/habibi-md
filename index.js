@@ -10,11 +10,12 @@ import figlet from "figlet"
 import { promisify } from "util"
 
 import config from "./config.js"
-import connect from "./lib/connect.js"
+import connect, { getSocket } from "./lib/connect.js"
 import handler, { loadPlugins } from "./handler.js"
 import { logError, logLine, logSystem } from "./lib/logger.js"
 import { ensureDir, formatUptime } from "./lib/function.js"
 import { backupDB, getStats, loadDB, saveDB } from "./lib/database.js"
+import { startAutoSholat } from "./lib/autosholat.js"
 
 const figletAsync = promisify(figlet)
 
@@ -141,7 +142,10 @@ const start = async () => {
   // 6. Mulai auto backup
   startAutoBackup()
 
-  // 7. Koneksi ke WhatsApp
+  // 7. Mulai scheduler autosholat
+  startAutoSholat(getSocket)
+
+  // 8. Koneksi ke WhatsApp
   logSystem(
     `Menghubungkan ke WhatsApp (metode: ${config.connection.method.toUpperCase()})...`
   )
