@@ -9,6 +9,7 @@ import axios from "axios"
 import config from "../config.js"
 import { getChat, updateChat } from "../lib/database.js"
 import { randomItem } from "../lib/function.js"
+import { logError } from "../lib/logger.js"
 import {
   dzikirPagi,
   dzikirPetang,
@@ -21,7 +22,17 @@ const DEFAULT_COUNTRY = "Indonesia"
 const METHOD = 20 // Kemenag RI
 
 // ─── HTTP helper ─────────────────────────────────────────────
-const http = axios.create({ timeout: 20000 })
+// PENTING: sertakan User-Agent browser. Banyak API publik
+// (aladhan, dll) di belakang Cloudflare & menolak UA default axios.
+const http = axios.create({
+  timeout: 25000,
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    Accept: "application/json, text/plain, */*",
+    "Accept-Language": "id,en;q=0.9",
+  },
+})
 
 // ─── Ambil jadwal sholat (aladhan) ───────────────────────────
 export const fetchSholat = async (city, country = DEFAULT_COUNTRY) => {
@@ -88,9 +99,12 @@ export const commands = [
       try {
         const data = await fetchSholat(city, country)
         await ctx.reply.text(formatSholat(data, city))
-      } catch {
+      } catch (err) {
+        logError(`Gagal memuat jadwal sholat untuk ${city}`, err)
         await ctx.reply.text(
-          `❌ Gagal memuat jadwal untuk *${city}*. Pastikan nama kota benar.\nContoh: *.sholat Bandung*`
+          `❌ Gagal memuat jadwal untuk *${city}*.\n` +
+            `Penyebab: ${err?.response?.status ? `HTTP ${err.response.status}` : err?.message || "koneksi"}\n` +
+            `Pastikan internet server aktif & nama kota benar.\nContoh: *.sholat Bandung*`
         )
       }
     },
@@ -113,8 +127,12 @@ export const commands = [
         await ctx.reply.text(
           `✅ Kota chat ini diatur ke *${ctx.query}*.\nJadwal sholat & autosholat akan memakai kota ini.`
         )
-      } catch {
-        await ctx.reply.text(`❌ Kota *${ctx.query}* tidak ditemukan.`)
+      } catch (err) {
+        logError(`Gagal validasi kota ${ctx.query}`, err)
+        await ctx.reply.text(
+          `❌ Kota *${ctx.query}* tidak ditemukan / gagal terhubung.\n` +
+            `Penyebab: ${err?.response?.status ? `HTTP ${err.response.status}` : err?.message || "koneksi"}`
+        )
       }
     },
   },
