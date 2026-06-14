@@ -2,7 +2,7 @@
 //   HABIBIH BOT - Plugin Islami
 //   Jadwal sholat, autosholat, Quran, tafsir, asmaul husna,
 //   doa, dzikir, hadits, niat puasa, kisah, imsak, kiblat, hijriah
-//   API publik: aladhan.com & equran.id (gratis, tanpa key)
+//   API publik: myquran.com, aladhan.com & equran.id (gratis)
 // ============================================================
 
 import axios from "axios"
@@ -28,7 +28,7 @@ const METHOD = 20 // Kemenag RI
 // - family: 4 + agent IPv4: cegah timeout akibat IPv6 menggantung
 const ipv4Agent = new https.Agent({ family: 4, keepAlive: true })
 const http = axios.create({
-  timeout: 20000,
+  timeout: 15000,
   httpsAgent: ipv4Agent,
   family: 4,
   headers: {
@@ -39,40 +39,13 @@ const http = axios.create({
   },
 })
 
-// ─── Ambil jadwal sholat (aladhan → fallback myquran) ────────
-export const fetchSholat = async (city, country = DEFAULT_COUNTRY) => {
-  // 1) Coba API aladhan.com
-  try {
-    const { data } = await http.get(
-      "https://api.aladhan.com/v1/timingsByCity",
-      { params: { city, country, method: METHOD } }
-    )
-    if (data?.code === 200 && data?.data?.timings) {
-      const d = data.data
-      return {
-        timings: d.timings,
-        masehi: d.date?.gregorian?.date || "",
-        hijri: d.date?.hijri
-          ? `${d.date.hijri.day} ${d.date.hijri.month?.en} ${d.date.hijri.year} H`
-          : "",
-        lat: d.meta?.latitude,
-        lng: d.meta?.longitude,
-        city,
-        source: "aladhan",
-      }
-    }
-  } catch (e) {
-    logError(`aladhan gagal (${city}), coba fallback myquran`, {
-      reason: e?.message,
-    })
-  }
-
-  // 2) Fallback API myquran.com (server Indonesia)
+// ─── Ambil jadwal: myquran.com (server Indonesia, cepat) ─────
+const fetchMyQuran = async (city) => {
   const { data: cari } = await http.get(
     `https://api.myquran.com/v2/sholat/kota/cari/${encodeURIComponent(city)}`
   )
   const kota = cari?.data?.[0]
-  if (!kota) throw new Error("Kota tidak ditemukan")
+  if (!kota) throw new Error("myquran: kota tidak ditemukan")
 
   const now = moment().tz(config.settings.timezone)
   const y = now.format("YYYY")
@@ -82,7 +55,7 @@ export const fetchSholat = async (city, country = DEFAULT_COUNTRY) => {
     `https://api.myquran.com/v2/sholat/jadwal/${kota.id}/${y}/${m}/${d}`
   )
   const j = jad?.data?.jadwal
-  if (!j) throw new Error("Jadwal tidak tersedia")
+  if (!j) throw new Error("myquran: jadwal tidak tersedia")
 
   return {
     timings: {
@@ -101,6 +74,40 @@ export const fetchSholat = async (city, country = DEFAULT_COUNTRY) => {
     city: kota.lokasi || city,
     source: "myquran",
   }
+}
+
+// ─── Ambil jadwal: aladhan.com (cakupan global) ──────────────
+const fetchAladhan = async (city, country) => {
+  const { data } = await http.get(
+    "https://api.aladhan.com/v1/timingsByCity",
+    { params: { city, country, method: METHOD } }
+  )
+  if (!(data?.code === 200 && data?.data?.timings))
+    throw new Error("aladhan: data tidak valid")
+  const d = data.data
+  return {
+    timings: d.timings,
+    masehi: d.date?.gregorian?.date || "",
+    hijri: d.date?.hijri
+      ? `${d.date.hijri.day} ${d.date.hijri.month?.en} ${d.date.hijri.year} H`
+      : "",
+    lat: d.meta?.latitude,
+    lng: d.meta?.longitude,
+    city,
+    source: "aladhan",
+  }
+}
+
+// ─── fetchSholat: myquran dulu → fallback aladhan ────────────
+// Bot fokus Indonesia: myquran lebih cepat & andal di server lokal.
+// aladhan dipakai bila myquran gagal (mis. kota luar negeri).
+export const fetchSholat = async (city, country = DEFAULT_COUNTRY) => {
+  try {
+    return await fetchMyQuran(city)
+  } catch (e) {
+    logError(`myquran gagal (${city}), coba aladhan`, { reason: e?.message })
+  }
+  return await fetchAladhan(city, country)
 }
 
 // ─── Format jadwal jadi teks ─────────────────────────────────
@@ -180,10 +187,10 @@ export const commands = [
         )
       try {
         // Validasi dengan fetch
-        await fetchSholat(ctx.query)
+        const data = await fetchSholat(ctx.query)
         updateChat(ctx.jid, { city: ctx.query })
         await ctx.reply.text(
-          `✅ Kota chat ini diatur ke *${ctx.query}*.\nJadwal sholat & autosholat akan memakai kota ini.`
+          `✅ Kota chat ini diatur ke *${data.city}*.\nJadwal sholat & autosholat akan memakai kota ini.`
         )
       } catch (err) {
         logError(`Gagal validasi kota ${ctx.query}`, err)
@@ -234,11 +241,12 @@ export const commands = [
       try {
         const data = await fetchSholat(city, country)
         const t = data.timings
-        const clean = (v) => (v || "").split(" ")[0]
+        const clean = (v) => String(v || "").split(" ")[0]
         await ctx.reply.text(
-          `╭─「 🌙 IMSAKIYAH 」\n│ 📍 ${city}\n├────────────────\n│ 🌄 Imsak   : ${clean(t.Imsak)}\n│ 🌅 Subuh   : ${clean(t.Fajr)}\n│ 🌇 Maghrib : ${clean(t.Maghrib)} (Buka)\n╰────────────────\n\n> ${config.watermark}`
+          `╭─「 🌙 IMSAKIYAH 」\n│ 📍 ${data.city}\n├────────────────\n│ 🌄 Imsak   : ${clean(t.Imsak)}\n│ 🌅 Subuh   : ${clean(t.Fajr)}\n│ 🌇 Maghrib : ${clean(t.Maghrib)} (Buka)\n╰────────────────\n\n> ${config.watermark}`
         )
-      } catch {
+      } catch (err) {
+        logError(`Gagal imsak ${city}`, err)
         await ctx.reply.text(`❌ Gagal memuat imsak untuk *${city}*.`)
       }
     },
