@@ -107,6 +107,7 @@ const categories = {
     title: "DOWNLOADER",
     items: [
       ".tiktok <url> — TikTok tanpa WM",
+      ".tiktokmp3 <url> — Audio TikTok",
       ".ytmp3 <url> — Audio YouTube",
       ".ytmp4 <url> — Video YouTube",
       ".play <judul> — Musik YouTube",

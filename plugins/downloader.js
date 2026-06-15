@@ -1,7 +1,7 @@
 // ============================================================
 //   HABIBIH BOT - Plugin Downloader
 //   Command:
-//     .tiktok .ytmp3 .ytmp4 .play .ytsearch
+//     .tiktok .tiktokmp3 .ytmp3 .ytmp4 .play .ytsearch
 //     .ig .fb .twitter .pin .capcut .gdrive
 //     .mediafire .spotify .soundcloud .threads .snackvideo
 //
@@ -12,14 +12,27 @@
 import config from "../config.js"
 import dl, { extractUrls, isValidUrl, formatDuration } from "../lib/downloader.js"
 import { logError } from "../lib/logger.js"
-import { formatNumber } from "../lib/function.js"
 
 // ─── Helper kecil ────────────────────────────────────────────
 
-/** Tag watermark di kaki pesan */
-const wm = `\n\n> ${config.watermark}`
+/** Footer watermark (baris terpisah, rapi). */
+const foot = `\n\n📌 ${config.watermark}`
 
-/** Pesan error sopan + log (tidak pernah crash) */
+/**
+ * Bangun caption rapi dari pasangan [label, value].
+ * Baris dengan value kosong otomatis di-skip.
+ * @param {string} title - judul box
+ * @param {Array<[string,string|number]>} rows
+ */
+const buildCaption = (title, rows = []) => {
+  const body = rows
+    .filter(([, v]) => v !== undefined && v !== null && `${v}`.trim() !== "")
+    .map(([label, v]) => `${label}: ${v}`)
+    .join("\n")
+  return `${title}${body ? `\n\n${body}` : ""}${foot}`
+}
+
+/** Pesan error sopan + log (tidak pernah crash). */
 const fail = async (ctx, judul, err) => {
   logError(`Downloader ${judul} gagal`, err)
   const detail =
@@ -35,13 +48,11 @@ const fail = async (ctx, judul, err) => {
     .catch(() => {})
 }
 
-/** Validasi input URL, balas panduan bila kosong/invalid */
+/** Validasi input URL, balas panduan bila kosong/invalid. */
 const needUrl = async (ctx, contoh) => {
   const url = ctx.query?.trim()
   if (!url) {
-    await ctx.reply.text(
-      `❌ Masukkan URL terlebih dahulu.\n\nContoh:\n${contoh}`
-    )
+    await ctx.reply.text(`❌ Masukkan URL terlebih dahulu.\n\nContoh:\n${contoh}`)
     return null
   }
   if (!isValidUrl(url)) {
@@ -51,23 +62,19 @@ const needUrl = async (ctx, contoh) => {
   return url
 }
 
-/** Reaksi "memproses" yang aman */
-const startProcess = async (ctx) => {
-  await ctx.reply.react("⏳").catch(() => {})
-}
-const doneProcess = async (ctx) => {
-  await ctx.reply.react("✅").catch(() => {})
-}
+const startProcess = (ctx) => ctx.reply.react("⏳").catch(() => {})
+const doneProcess = (ctx) => ctx.reply.react("✅").catch(() => {})
 
 /**
  * Ambil URL media pertama yang masuk akal dari hasil btch-downloader.
- * Mencoba field umum dulu, lalu fallback ke extractUrls().
- * @param {*} result
+ * Mengutamakan field media utama, baru fallback ke extractUrls().
+ * @param {*} item
  * @returns {string|null}
  */
-const pickMediaUrl = (result) => {
-  const data = Array.isArray(result) ? result[0] : result
+const pickMediaUrl = (item) => {
+  const data = Array.isArray(item) ? item[0] : item
   if (!data) return null
+  if (typeof data === "string") return isValidUrl(data) ? data : null
 
   const candidates = [
     data.url,
@@ -85,9 +92,67 @@ const pickMediaUrl = (result) => {
   ].filter((u) => typeof u === "string" && isValidUrl(u))
 
   if (candidates.length) return candidates[0]
-
-  const all = extractUrls(result)
+  const all = extractUrls(data)
   return all.length ? all[0] : null
+}
+
+/**
+ * Kirim media dengan deteksi tipe yang benar (video/image/audio)
+ * berdasarkan Content-Type — memperbaiki kasus video Instagram yang
+ * sebelumnya terkirim sebagai gambar.
+ * @param {object} ctx
+ * @param {string} url
+ * @param {string} caption - hanya dipakai utk video/image
+ */
+const sendSmartMedia = async (ctx, url, caption = "") => {
+  const type = await dl.detectMediaType(url)
+  if (type === "video") {
+    return ctx.sock.sendMessage(
+      ctx.jid,
+      { video: { url }, caption },
+      { quoted: ctx.msg }
+    )
+  }
+  if (type === "audio") {
+    return ctx.sock.sendMessage(
+      ctx.jid,
+      { audio: { url }, mimetype: "audio/mp4" },
+      { quoted: ctx.msg }
+    )
+  }
+  // image + unknown (mayoritas thumbnail/foto) dikirim sebagai gambar
+  return ctx.sock.sendMessage(
+    ctx.jid,
+    { image: { url }, caption },
+    { quoted: ctx.msg }
+  )
+}
+
+/**
+ * Kirim hasil YouTube (audio/video) yang bisa berupa Buffer ATAU URL.
+ * @param {object} ctx
+ * @param {"audio"|"video"} kind
+ * @param {{buffer:Buffer|null,url:string|null,title:string,mimetype:string}} media
+ * @param {string} caption
+ */
+const sendYtMedia = async (ctx, kind, media, caption = "") => {
+  const source = media.buffer ? media.buffer : { url: media.url }
+  if (kind === "audio") {
+    return ctx.sock.sendMessage(
+      ctx.jid,
+      {
+        audio: source,
+        mimetype: media.mimetype || "audio/mp4",
+        fileName: `${media.title || "audio"}.mp3`,
+      },
+      { quoted: ctx.msg }
+    )
+  }
+  return ctx.sock.sendMessage(
+    ctx.jid,
+    { video: source, mimetype: media.mimetype || "video/mp4", caption },
+    { quoted: ctx.msg }
+  )
 }
 
 // ─── Commands Export ──────────────────────────────────────────
@@ -110,26 +175,27 @@ export const commands = [
       await startProcess(ctx)
       try {
         const data = await dl.tiktok(url)
-        const caption =
-          `🎵 *TIKTOK DOWNLOADER*\n\n` +
-          `👤 Author : ${data.author}\n` +
-          (data.title ? `📝 Judul  : ${data.title}\n` : "") +
-          (data.duration ? `⏱️ Durasi : ${formatDuration(data.duration)}\n` : "") +
-          wm
+        const caption = buildCaption("🎵 *TIKTOK DOWNLOADER*", [
+          ["👤 Author", data.author],
+          ["📝 Judul", data.title],
+          ["⏱️ Durasi", data.duration ? formatDuration(data.duration) : ""],
+        ])
 
         if (data.type === "image" && data.images.length) {
-          // Slide foto -> kirim satu per satu
+          // Slide foto -> album terurut
           for (let i = 0; i < data.images.length; i++) {
             await ctx.sock.sendMessage(
               ctx.jid,
               {
                 image: { url: data.images[i] },
-                caption: i === 0 ? caption : `Slide ${i + 1}/${data.images.length}`,
+                caption:
+                  i === 0
+                    ? caption
+                    : `🖼️ Slide ${i + 1}/${data.images.length}`,
               },
               { quoted: ctx.msg }
             )
           }
-          // sertakan audio bila ada
           if (data.audio) {
             await ctx.sock.sendMessage(
               ctx.jid,
@@ -155,6 +221,46 @@ export const commands = [
   },
 
   // ════════════════════════════════════════════════════════
+  //  TIKTOK MP3 (audio/sound saja)
+  // ════════════════════════════════════════════════════════
+  {
+    pattern: /^(tiktokmp3|ttmp3|ttaudio)$/,
+    description: "Download audio/sound dari TikTok",
+    category: "downloader",
+    owner: false, group: false, private: false,
+    admin: false, botAdmin: false, premium: false,
+
+    handler: async (ctx) => {
+      const url = await needUrl(ctx, ".tiktokmp3 https://vt.tiktok.com/xxxx")
+      if (!url) return
+
+      await startProcess(ctx)
+      try {
+        const data = await dl.tiktokMp3(url)
+
+        await ctx.sock.sendMessage(
+          ctx.jid,
+          {
+            audio: { url: data.url },
+            mimetype: "audio/mp4",
+            fileName: `${data.title}.mp3`,
+          },
+          { quoted: ctx.msg }
+        )
+        await ctx.reply.text(
+          buildCaption("🎧 *TIKTOK MP3*", [
+            ["🎵 Judul", data.title],
+            ["👤 Author", data.author],
+          ])
+        )
+        await doneProcess(ctx)
+      } catch (err) {
+        await fail(ctx, "TikTok MP3", err)
+      }
+    },
+  },
+
+  // ════════════════════════════════════════════════════════
   //  YOUTUBE MP3
   // ════════════════════════════════════════════════════════
   {
@@ -171,23 +277,13 @@ export const commands = [
       await startProcess(ctx)
       try {
         const data = await dl.ytmp3(url)
-
-        await ctx.sock.sendMessage(
-          ctx.jid,
-          {
-            audio: { url: data.url },
-            mimetype: "audio/mp4",
-            fileName: `${data.title}.mp3`,
-          },
-          { quoted: ctx.msg }
-        )
-
+        await sendYtMedia(ctx, "audio", data)
         await ctx.reply.text(
-          `🎧 *YOUTUBE MP3*\n\n` +
-            `📝 Judul  : ${data.title}\n` +
-            `👤 Channel: ${data.author}\n` +
-            `⏱️ Durasi : ${data.durationText}` +
-            wm
+          buildCaption("🎧 *YOUTUBE MP3*", [
+            ["📝 Judul", data.title],
+            ["👤 Channel", data.author],
+            ["⏱️ Durasi", data.durationText],
+          ])
         )
         await doneProcess(ctx)
       } catch (err) {
@@ -213,21 +309,12 @@ export const commands = [
       await startProcess(ctx)
       try {
         const data = await dl.ytmp4(url)
-
-        await ctx.sock.sendMessage(
-          ctx.jid,
-          {
-            video: { url: data.url },
-            caption:
-              `🎬 *YOUTUBE MP4*\n\n` +
-              `📝 Judul  : ${data.title}\n` +
-              `👤 Channel: ${data.author}\n` +
-              `⏱️ Durasi : ${data.durationText}\n` +
-              `📺 Kualitas: ${data.quality}` +
-              wm,
-          },
-          { quoted: ctx.msg }
-        )
+        const caption = buildCaption("🎬 *YOUTUBE MP4*", [
+          ["📝 Judul", data.title],
+          ["👤 Channel", data.author],
+          ["⏱️ Durasi", data.durationText],
+        ])
+        await sendYtMedia(ctx, "video", data, caption)
         await doneProcess(ctx)
       } catch (err) {
         await fail(ctx, "YouTube MP4", err)
@@ -257,15 +344,13 @@ export const commands = [
       try {
         const data = await dl.play(query)
 
-        // Kirim info dulu (dengan thumbnail bila ada)
-        const info =
-          `🎵 *PLAY - YOUTUBE*\n\n` +
-          `📝 Judul  : ${data.title}\n` +
-          `👤 Channel: ${data.author}\n` +
-          `⏱️ Durasi : ${data.durationText}\n\n` +
-          `⏳ Mengirim audio...`
+        const info = buildCaption("🎵 *PLAY - YOUTUBE*", [
+          ["📝 Judul", data.title],
+          ["👤 Channel", data.author],
+          ["⏱️ Durasi", data.durationText],
+        ])
 
-        if (data.thumbnail) {
+        if (data.thumbnail && isValidUrl(data.thumbnail)) {
           await ctx.sock.sendMessage(
             ctx.jid,
             { image: { url: data.thumbnail }, caption: info },
@@ -275,17 +360,7 @@ export const commands = [
           await ctx.reply.text(info)
         }
 
-        // Kirim audio playable langsung di WA
-        await ctx.sock.sendMessage(
-          ctx.jid,
-          {
-            audio: { url: data.url },
-            mimetype: "audio/mp4",
-            fileName: `${data.title}.mp3`,
-          },
-          { quoted: ctx.msg }
-        )
-
+        await sendYtMedia(ctx, "audio", data)
         await doneProcess(ctx)
       } catch (err) {
         await fail(ctx, "Play (YouTube)", err)
@@ -317,15 +392,14 @@ export const commands = [
 
         let text = `🔎 *HASIL PENCARIAN YOUTUBE*\n_${query}_\n`
         results.forEach((r, i) => {
+          const views = r.viewsText ? ` • 👁️ ${r.viewsText}` : ""
           text +=
             `\n*${i + 1}.* ${r.title}\n` +
-            `   👤 ${r.author} • ⏱️ ${r.durationText} • 👁️ ${formatNumber(
-              r.views
-            )}\n` +
+            `   👤 ${r.author} • ⏱️ ${r.durationText}${views}\n` +
             `   🔗 ${r.url}\n`
         })
         text += `\n💡 Putar audio: *.play <judul>* atau *.ytmp3 <url>*`
-        text += wm
+        text += foot
 
         await ctx.reply.text(text)
         await doneProcess(ctx)
@@ -358,14 +432,11 @@ export const commands = [
         for (const item of items) {
           const media = pickMediaUrl(item)
           if (!media) continue
-          // tebak video vs gambar dari ekstensi
-          const isVideo = /\.(mp4|mov|webm)(\?|$)/i.test(media) || item.type === "video"
-          await ctx.sock.sendMessage(
-            ctx.jid,
-            isVideo
-              ? { video: { url: media }, caption: sent === 0 ? `📸 *INSTAGRAM*${wm}` : "" }
-              : { image: { url: media }, caption: sent === 0 ? `📸 *INSTAGRAM*${wm}` : "" },
-            { quoted: ctx.msg }
+          // deteksi video vs gambar via Content-Type (akurat untuk IG CDN)
+          await sendSmartMedia(
+            ctx,
+            media,
+            sent === 0 ? `📸 *INSTAGRAM*${foot}` : ""
           )
           sent++
         }
@@ -397,12 +468,7 @@ export const commands = [
         const result = await dl.facebook(url)
         const media = pickMediaUrl(result)
         if (!media) throw new Error("Video tidak ditemukan.")
-
-        await ctx.sock.sendMessage(
-          ctx.jid,
-          { video: { url: media }, caption: `📘 *FACEBOOK*${wm}` },
-          { quoted: ctx.msg }
-        )
+        await sendSmartMedia(ctx, media, `📘 *FACEBOOK*${foot}`)
         await doneProcess(ctx)
       } catch (err) {
         await fail(ctx, "Facebook", err)
@@ -429,15 +495,7 @@ export const commands = [
         const result = await dl.twitter(url)
         const media = pickMediaUrl(result)
         if (!media) throw new Error("Media tidak ditemukan.")
-
-        const isVideo = /\.(mp4|mov|webm)(\?|$)/i.test(media)
-        await ctx.sock.sendMessage(
-          ctx.jid,
-          isVideo
-            ? { video: { url: media }, caption: `🐦 *TWITTER / X*${wm}` }
-            : { image: { url: media }, caption: `🐦 *TWITTER / X*${wm}` },
-          { quoted: ctx.msg }
-        )
+        await sendSmartMedia(ctx, media, `🐦 *TWITTER / X*${foot}`)
         await doneProcess(ctx)
       } catch (err) {
         await fail(ctx, "Twitter/X", err)
@@ -464,15 +522,7 @@ export const commands = [
         const result = await dl.pinterest(url)
         const media = pickMediaUrl(result)
         if (!media) throw new Error("Media tidak ditemukan.")
-
-        const isVideo = /\.(mp4|mov|webm)(\?|$)/i.test(media)
-        await ctx.sock.sendMessage(
-          ctx.jid,
-          isVideo
-            ? { video: { url: media }, caption: `📌 *PINTEREST*${wm}` }
-            : { image: { url: media }, caption: `📌 *PINTEREST*${wm}` },
-          { quoted: ctx.msg }
-        )
+        await sendSmartMedia(ctx, media, `📌 *PINTEREST*${foot}`)
         await doneProcess(ctx)
       } catch (err) {
         await fail(ctx, "Pinterest", err)
@@ -499,12 +549,7 @@ export const commands = [
         const result = await dl.capcut(url)
         const media = pickMediaUrl(result)
         if (!media) throw new Error("Video tidak ditemukan.")
-
-        await ctx.sock.sendMessage(
-          ctx.jid,
-          { video: { url: media }, caption: `✂️ *CAPCUT*${wm}` },
-          { quoted: ctx.msg }
-        )
+        await sendSmartMedia(ctx, media, `✂️ *CAPCUT*${foot}`)
         await doneProcess(ctx)
       } catch (err) {
         await fail(ctx, "CapCut", err)
@@ -540,7 +585,7 @@ export const commands = [
             document: { url: media },
             fileName,
             mimetype: data?.mimetype || "application/octet-stream",
-            caption: `📁 *GOOGLE DRIVE*\n📝 ${fileName}${wm}`,
+            caption: buildCaption("📁 *GOOGLE DRIVE*", [["📝 Nama", fileName]]),
           },
           { quoted: ctx.msg }
         )
@@ -579,11 +624,10 @@ export const commands = [
             document: { url: media },
             fileName,
             mimetype: data?.mime || data?.mimetype || "application/octet-stream",
-            caption:
-              `📁 *MEDIAFIRE*\n` +
-              `📝 ${fileName}\n` +
-              (data?.size || data?.ukuran ? `📦 ${data.size || data.ukuran}\n` : "") +
-              wm,
+            caption: buildCaption("📁 *MEDIAFIRE*", [
+              ["📝 Nama", fileName],
+              ["📦 Ukuran", data?.size || data?.ukuran || ""],
+            ]),
           },
           { quoted: ctx.msg }
         )
@@ -595,11 +639,11 @@ export const commands = [
   },
 
   // ════════════════════════════════════════════════════════
-  //  SPOTIFY
+  //  SPOTIFY (metadata Spotify -> audio dari YouTube)
   // ════════════════════════════════════════════════════════
   {
     pattern: /^(spotify|spotifydl|spdl)$/,
-    description: "Download lagu dari Spotify",
+    description: "Download lagu Spotify (audio via YouTube)",
     category: "downloader",
     owner: false, group: false, private: false,
     admin: false, botAdmin: false, premium: false,
@@ -610,35 +654,25 @@ export const commands = [
 
       await startProcess(ctx)
       try {
-        const result = await dl.spotify(url)
-        const data = Array.isArray(result) ? result[0] : result
-        const media = pickMediaUrl(result)
-        if (!media) throw new Error("Audio tidak ditemukan.")
+        const data = await dl.spotify(url)
 
-        const title = data?.title || data?.name || "Spotify Track"
-        if (data?.thumbnail && isValidUrl(data.thumbnail)) {
+        const info = buildCaption("🎶 *SPOTIFY*", [
+          ["🎵 Judul", data.title],
+          ["👤 Channel", data.author],
+          ["🔁 Sumber audio", data.source],
+        ])
+
+        if (data.thumbnail && isValidUrl(data.thumbnail)) {
           await ctx.sock.sendMessage(
             ctx.jid,
-            {
-              image: { url: data.thumbnail },
-              caption:
-                `🎶 *SPOTIFY*\n📝 ${title}\n` +
-                (data?.artist ? `👤 ${data.artist}\n` : "") +
-                wm,
-            },
+            { image: { url: data.thumbnail }, caption: info },
             { quoted: ctx.msg }
           )
+        } else {
+          await ctx.reply.text(info)
         }
 
-        await ctx.sock.sendMessage(
-          ctx.jid,
-          {
-            audio: { url: media },
-            mimetype: "audio/mp4",
-            fileName: `${title}.mp3`,
-          },
-          { quoted: ctx.msg }
-        )
+        await sendYtMedia(ctx, "audio", data)
         await doneProcess(ctx)
       } catch (err) {
         await fail(ctx, "Spotify", err)
@@ -677,7 +711,9 @@ export const commands = [
           },
           { quoted: ctx.msg }
         )
-        await ctx.reply.text(`🔊 *SOUNDCLOUD*\n📝 ${title}${wm}`)
+        await ctx.reply.text(
+          buildCaption("🔊 *SOUNDCLOUD*", [["📝 Judul", title]])
+        )
         await doneProcess(ctx)
       } catch (err) {
         await fail(ctx, "SoundCloud", err)
@@ -686,7 +722,7 @@ export const commands = [
   },
 
   // ════════════════════════════════════════════════════════
-  //  THREADS
+  //  THREADS (scraper keyless)
   // ════════════════════════════════════════════════════════
   {
     pattern: /^(threads|thread)$/,
@@ -696,30 +732,30 @@ export const commands = [
     admin: false, botAdmin: false, premium: false,
 
     handler: async (ctx) => {
-      const url = await needUrl(ctx, ".threads https://www.threads.net/@user/post/xxxx")
+      const url = await needUrl(
+        ctx,
+        ".threads https://www.threads.net/@user/post/xxxx"
+      )
       if (!url) return
 
       await startProcess(ctx)
       try {
-        const result = await dl.threads(url)
-        const items = Array.isArray(result) ? result : [result]
-        let sent = 0
+        const data = await dl.threads(url)
+        const caption = `🧵 *THREADS*${foot}`
 
-        for (const item of items) {
-          const media = pickMediaUrl(item)
-          if (!media) continue
-          const isVideo = /\.(mp4|mov|webm)(\?|$)/i.test(media)
+        if (data.type === "video") {
           await ctx.sock.sendMessage(
             ctx.jid,
-            isVideo
-              ? { video: { url: media }, caption: sent === 0 ? `🧵 *THREADS*${wm}` : "" }
-              : { image: { url: media }, caption: sent === 0 ? `🧵 *THREADS*${wm}` : "" },
+            { video: { url: data.url }, caption },
             { quoted: ctx.msg }
           )
-          sent++
+        } else {
+          await ctx.sock.sendMessage(
+            ctx.jid,
+            { image: { url: data.url }, caption },
+            { quoted: ctx.msg }
+          )
         }
-
-        if (!sent) throw new Error("Media tidak ditemukan.")
         await doneProcess(ctx)
       } catch (err) {
         await fail(ctx, "Threads", err)
@@ -746,12 +782,7 @@ export const commands = [
         const result = await dl.snackvideo(url)
         const media = pickMediaUrl(result)
         if (!media) throw new Error("Video tidak ditemukan.")
-
-        await ctx.sock.sendMessage(
-          ctx.jid,
-          { video: { url: media }, caption: `🍿 *SNACKVIDEO*${wm}` },
-          { quoted: ctx.msg }
-        )
+        await sendSmartMedia(ctx, media, `🍿 *SNACKVIDEO*${foot}`)
         await doneProcess(ctx)
       } catch (err) {
         await fail(ctx, "SnackVideo", err)
