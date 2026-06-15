@@ -21,6 +21,7 @@
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "^7.0.0-rc13",
     "axios": "^1.7.9",
+    "btch-downloader": "^4.0.31",
     "chalk": "^5.3.0",
     "figlet": "^1.8.0",
     "fs-extra": "^11.2.0",
