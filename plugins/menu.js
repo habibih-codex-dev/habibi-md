@@ -123,6 +123,22 @@ const categories = {
       ".soundcloud <url> — SoundCloud",
       ".threads <url> — Threads",
       ".snackvideo <url> — SnackVideo",
+      ".igstory <username> — Story IG",
+      ".fbstory <url> — Story Facebook",
+      ".terabox <url> — Terabox",
+      ".sfile <url> — Sfile.mobi",
+      ".mega <url> — Mega.nz",
+    ],
+  },
+  musik: {
+    emoji: "🎵",
+    title: "MUSIK & AUDIO",
+    items: [
+      ".lirik <judul> — Lirik lagu",
+      ".chord <judul> — Kunci gitar",
+      ".shazam — Kenali lagu (reply VN/audio/video)",
+      ".carilagu — Alias .shazam",
+      ".ringtone <nama> — Nada dering singkat",
     ],
   },
   tools: {
