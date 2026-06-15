@@ -27,6 +27,25 @@ const config = {
   watermark: "© Habibih Bot | Habibi Official",
   footer: "Habibih Bot | https://habibi-store-digital.vercel.app",
 
+  // ─── Downloader Engine ───────────────────────────────────
+  // Arsitektur downloader memakai pola MULTI-SUMBER (fallback chain):
+  // bila satu sumber gagal/diblokir, otomatis pindah ke sumber lain.
+  // Untuk stabilitas paling permanen, SELF-HOST Cobalt
+  // (https://github.com/imputnet/cobalt) lalu isi URL instance di sini.
+  downloader: {
+    // Daftar instance Cobalt (urut prioritas). Kosongkan untuk skip.
+    // Isi instance milikmu sendiri agar paling stabil & tak gampang down.
+    cobaltInstances: [
+      // "https://cobalt-instance-kamu.com",
+    ],
+    // API key Cobalt (kalau instance-mu memerlukannya)
+    cobaltApiKey: process.env.COBALT_API_KEY || "",
+    // Kualitas video maksimum yang diminta (agar ukuran wajar utk WA)
+    videoQuality: "720",
+    // Timeout per-sumber (ms)
+    timeout: 45000,
+  },
+
   // ─── Media Menu ──────────────────────────────────────────
   menu: {
     mediaUrl: "https://files.catbox.moe/1p0ytd.mp4",
