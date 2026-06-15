@@ -13,21 +13,11 @@
 
 import config from "../config.js"
 import dl, { isValidUrl, extractUrls } from "../lib/downloader.js"
-import { getSettings, updateSettings } from "../lib/database.js"
 import { logError } from "../lib/logger.js"
 
 // ─── Helper ───────────────────────────────────────────────────
 
 const foot = `\n\n📌 ${config.watermark}`
-
-/**
- * Ambil cookie sesi: prioritas database (diset Owner via command),
- * lalu fallback ke environment variable (config.session).
- */
-const getIgCookie = () =>
-  (getSettings().igCookie || config.session?.igCookie || "").trim()
-const getFbCookie = () =>
-  (getSettings().fbCookie || config.session?.fbCookie || "").trim()
 
 const startProcess = (ctx) => ctx.reply.react("⏳").catch(() => {})
 const doneProcess = (ctx) => ctx.reply.react("✅").catch(() => {})
@@ -99,7 +89,7 @@ export const commands = [
 
       await startProcess(ctx)
       try {
-        const items = await dl.igStory(username, { cookie: getIgCookie() })
+        const items = await dl.igStory(username)
 
         for (let i = 0; i < items.length; i++) {
           const it = items[i]
@@ -136,7 +126,7 @@ export const commands = [
 
       await startProcess(ctx)
       try {
-        const result = await dl.fbStory(url, { cookie: getFbCookie() })
+        const result = await dl.fbStory(url)
         const media = pickMediaUrl(result)
         if (!media) throw new Error("Media story tidak ditemukan.")
 
@@ -269,111 +259,6 @@ export const commands = [
       } catch (err) {
         await fail(ctx, "Mega.nz", err)
       }
-    },
-  },
-
-  // ════════════════════════════════════════════════════════
-  //  SET COOKIE INSTAGRAM (Owner)
-  // ════════════════════════════════════════════════════════
-  {
-    pattern: /^(setigcookie|igcookie)$/,
-    description: "Set cookie sesi Instagram (untuk .igstory)",
-    category: "owner",
-    owner: true, group: false, private: false,
-    admin: false, botAdmin: false, premium: false,
-
-    handler: async (ctx) => {
-      const cookie = ctx.query?.trim()
-      if (!cookie) {
-        return ctx.reply.text(
-          `❌ Masukkan cookie Instagram.\n\n` +
-            `Contoh:\n.setigcookie sessionid=12345%3Aabc...\n\n` +
-            `💡 *Kirim di chat pribadi* agar cookie tidak terlihat. ` +
-            `Ambil dari browser: Application → Cookies → instagram.com → sessionid.`
-        )
-      }
-      updateSettings({ igCookie: cookie })
-      await ctx.reply.text(
-        `✅ Cookie Instagram tersimpan. *.igstory* kini memakai sesi login.\n` +
-          `_Hapus dengan: .delcookie ig_`
-      )
-    },
-  },
-
-  // ════════════════════════════════════════════════════════
-  //  SET COOKIE FACEBOOK (Owner)
-  // ════════════════════════════════════════════════════════
-  {
-    pattern: /^(setfbcookie|fbcookie)$/,
-    description: "Set cookie sesi Facebook (untuk .fbstory)",
-    category: "owner",
-    owner: true, group: false, private: false,
-    admin: false, botAdmin: false, premium: false,
-
-    handler: async (ctx) => {
-      const cookie = ctx.query?.trim()
-      if (!cookie) {
-        return ctx.reply.text(
-          `❌ Masukkan cookie Facebook.\n\n` +
-            `Contoh:\n.setfbcookie c_user=100xxx; xs=xxxx; ...\n\n` +
-            `💡 *Kirim di chat pribadi.* ` +
-            `Ambil dari browser: Application → Cookies → facebook.com.`
-        )
-      }
-      updateSettings({ fbCookie: cookie })
-      await ctx.reply.text(
-        `✅ Cookie Facebook tersimpan. *.fbstory* kini memakai sesi login.\n` +
-          `_Hapus dengan: .delcookie fb_`
-      )
-    },
-  },
-
-  // ════════════════════════════════════════════════════════
-  //  HAPUS COOKIE (Owner)
-  // ════════════════════════════════════════════════════════
-  {
-    pattern: /^(delcookie|hapuscookie)$/,
-    description: "Hapus cookie sesi IG/FB",
-    category: "owner",
-    owner: true, group: false, private: false,
-    admin: false, botAdmin: false, premium: false,
-
-    handler: async (ctx) => {
-      const which = (ctx.args[0] || "").toLowerCase()
-      if (which === "ig") {
-        updateSettings({ igCookie: "" })
-        return ctx.reply.text("🗑️ Cookie Instagram dihapus.")
-      }
-      if (which === "fb") {
-        updateSettings({ fbCookie: "" })
-        return ctx.reply.text("🗑️ Cookie Facebook dihapus.")
-      }
-      updateSettings({ igCookie: "", fbCookie: "" })
-      await ctx.reply.text(
-        "🗑️ Semua cookie (IG & FB) dihapus.\n_Gunakan: .delcookie ig | .delcookie fb_"
-      )
-    },
-  },
-
-  // ════════════════════════════════════════════════════════
-  //  STATUS COOKIE (Owner) — tidak menampilkan isi cookie
-  // ════════════════════════════════════════════════════════
-  {
-    pattern: /^(cookiestatus|cekcookie)$/,
-    description: "Cek status cookie sesi IG/FB",
-    category: "owner",
-    owner: true, group: false, private: false,
-    admin: false, botAdmin: false, premium: false,
-
-    handler: async (ctx) => {
-      const ig = getIgCookie() ? "✅ Aktif" : "❌ Belum diset"
-      const fb = getFbCookie() ? "✅ Aktif" : "❌ Belum diset"
-      await ctx.reply.text(
-        `🍪 *STATUS COOKIE SESI*\n\n` +
-          `📸 Instagram : ${ig}\n` +
-          `📘 Facebook  : ${fb}\n\n` +
-          `_Atur: .setigcookie / .setfbcookie • Hapus: .delcookie_${foot}`
-      )
     },
   },
 ]

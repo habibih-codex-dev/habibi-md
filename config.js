@@ -27,17 +27,6 @@ const config = {
   watermark: "© Habibih Bot | Habibi Official",
   footer: "Habibih Bot | https://habibi-store-digital.vercel.app",
 
-  // ─── Session Cookie (opsional — untuk Story IG/FB) ───────
-  // DISARANKAN diisi via environment variable, JANGAN commit cookie asli!
-  //   IG_COOKIE / IG_SESSIONID  -> cookie login Instagram
-  //   FB_COOKIE                 -> cookie login Facebook
-  // Cookie juga bisa diatur runtime oleh Owner via:
-  //   .setigcookie <cookie> | .setfbcookie <cookie>  (disimpan ke database)
-  session: {
-    igCookie: process.env.IG_COOKIE || process.env.IG_SESSIONID || "",
-    fbCookie: process.env.FB_COOKIE || "",
-  },
-
   // ─── Media Menu ──────────────────────────────────────────
   menu: {
     mediaUrl: "https://files.catbox.moe/1p0ytd.mp4",
